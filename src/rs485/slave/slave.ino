@@ -1,45 +1,53 @@
 #include "Arduino.h"
 #include <SoftwareSerial.h>
-#define RXPin        1  // Serial Receive pin
-#define TXPin        0  // Serial Transmit pin
- 
-//RS485 control
+#define RXPin 1 // Serial Receive pin
+#define TXPin 0 // Serial Transmit pin
+
+// RS485 control
 #define SERIAL_COMMUNICATION_CONTROL_PIN 10 // Transmission set pin
-#define RS485_TX_PIN_VALUE HIGH
-#define RS485_RX_PIN_VALUE LOW
- 
+
 SoftwareSerial RS485Serial(RXPin, TXPin); // RX, TX
- 
-int byteSend;
- 
-void setup()  {
-  Serial.begin(115200);
- 
-  pinMode(SERIAL_COMMUNICATION_CONTROL_PIN, OUTPUT);
-  digitalWrite(SERIAL_COMMUNICATION_CONTROL_PIN, RS485_RX_PIN_VALUE);
-  RS485Serial.begin(115200);   // set the data rate
-}
+
+// receive data control
 String dataReceived;
 bool isDataReceived = false;
-void loop() {
-    digitalWrite(SERIAL_COMMUNICATION_CONTROL_PIN, RS485_RX_PIN_VALUE);// Init receive
- 
-    if (RS485Serial.available()){
+
+void setReceiveMode()
+{
+    digitalWrite(SERIAL_COMMUNICATION_CONTROL_PIN, LOW);
+}
+
+void setTrasmitMode()
+{
+    digitalWrite(SERIAL_COMMUNICATION_CONTROL_PIN, HIGH);
+}
+
+void setup()
+{
+    pinMode(SERIAL_COMMUNICATION_CONTROL_PIN, OUTPUT);
+    Serial.begin(115200);
+    RS485Serial.begin(115200);
+    setReceiveMode();
+}
+
+void loop()
+{
+    //listen 485 serial data
+    if (RS485Serial.available())
+    {
         dataReceived = RS485Serial.read();
-        Serial.print("Data received ");
+        Serial.print("Data received: ");
         Serial.println(dataReceived);
         isDataReceived = true;
         delay(10);
     }
- 
-    if (isDataReceived){
-        delay(111);
-        digitalWrite(SERIAL_COMMUNICATION_CONTROL_PIN, RS485_TX_PIN_VALUE); // Init transmit
+    //send resp to master
+    if (isDataReceived)
+    {
+        setTrasmitMode(); // switch transmit mode
         Serial.println("Send response!");
-        RS485Serial.print("OK --> ");
         RS485Serial.println(dataReceived);
         isDataReceived = false;
+        setReceiveMode();
     }
- 
-    delay(111);
 }
