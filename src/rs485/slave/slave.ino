@@ -25,7 +25,7 @@ void loop() {
     digitalWrite(SERIAL_COMMUNICATION_CONTROL_PIN, RS485_RX_PIN_VALUE);// Init receive
  
     if (RS485Serial.available()){
-        dataReceived = RS485Serial.readString();
+        dataReceived = RS485Serial.read();
         Serial.print("Data received ");
         Serial.println(dataReceived);
         isDataReceived = true;
