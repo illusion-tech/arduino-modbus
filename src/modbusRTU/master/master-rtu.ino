@@ -48,7 +48,7 @@ uint16_t res[1];
 
 void loop() {
   if (!mb.slave()) {
-    mb.readHreg(SLAVE_ID, 0, res, 1, cbHandle);
+    mb.readHreg(SLAVE_ID, 0, res, 2, cbHandle);
     while (mb.slave()) {
       mb.task();
       delayMicroseconds(100);
@@ -65,27 +65,27 @@ void loop() {
   
   delay(1000);
 
-  if (!mb.slave()) {
-    mb.readCoil(SLAVE_ID, 0, coils, 5, cbHandle);
-    while (mb.slave()) {
-      mb.task();
-      delayMicroseconds(100);
-    }
-    if (code == Modbus::EX_SUCCESS) {
-      neopixelWrite(RGB_PIN, 0, RGB_BRIGHTNESS, 0);
-      Serial.printf("coil value: ");
-      for (int i = 0; i < 5; i++) {
-        Serial.printf("%d ", coils[i]);
-      }
-      Serial.println();
-    } else {
-      neopixelWrite(RGB_PIN, RGB_BRIGHTNESS, 0, 0);
-    }
-    delay(100);
-    neopixelWrite(RGB_PIN, 0, 0, 0);
-  }
+  // if (!mb.slave()) {
+  //   mb.readCoil(SLAVE_ID, 0, coils, 5, cbHandle);
+  //   while (mb.slave()) {
+  //     mb.task();
+  //     delayMicroseconds(100);
+  //   }
+  //   if (code == Modbus::EX_SUCCESS) {
+  //     neopixelWrite(RGB_PIN, 0, RGB_BRIGHTNESS, 0);
+  //     Serial.printf("coil value: ");
+  //     for (int i = 0; i < 5; i++) {
+  //       Serial.printf("%d ", coils[i]);
+  //     }
+  //     Serial.println();
+  //   } else {
+  //     neopixelWrite(RGB_PIN, RGB_BRIGHTNESS, 0, 0);
+  //   }
+  //   delay(100);
+  //   neopixelWrite(RGB_PIN, 0, 0, 0);
+  // }
 
-  delay(1000);
+  // delay(1000);
 
   // if (!mb.slave()) {
   //   mb.writeHreg(SLAVE_ID, 0, 10, cbHandle);
