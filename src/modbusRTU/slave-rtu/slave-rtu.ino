@@ -1,44 +1,98 @@
 #include <ModbusRTU.h>
 
+// 作为从机响应消息给上位机
+ModbusRTU serverMb;
 #define RX_PIN 18
 #define TX_PIN 17
-HardwareSerial S(1);
-
 #define EN_PIN 21
 #define REGN 0
 #define SLAVE_ID 1
+HardwareSerial serverSerial(1);
 
-ModbusRTU mb;
+// 作为主机读取传感器数值
+ModbusRTU sensorMb;
+#define SENSOR_RX_PIN 48
+#define SENSOR_TX_PIN 47
+#define SENSOR_EN_PIN 38
+#define SENSOR_ID 1
+HardwareSerial sensorSerial(2);
 
-uint16_t getRegCb(TRegister *reg, uint16_t val) {
-  int regType = reg->address.type;
-  uint16_t regAddress = reg->address.address;
-  
-  // Serial.printf("Get RegType: %d, RegAddress: %d, RegVal: %d\n", regType, regAddress, val);
+Modbus::ResultCode code;
 
-  return val;
+xSemaphoreHandle xMutex;
+
+bool cbHandle(Modbus::ResultCode event, uint16_t transactionId, void* data) {
+  code = event;
+
+  return true;
 }
 
+// 传感器读数
+uint16_t sensorVal[1];
+
+// 读取传感器数据
+void readSensor() {
+  xSemaphoreTake(xMutex, portMAX_DELAY);
+
+  if (!sensorMb.slave()) {
+    sensorMb.readHreg(SENSOR_ID, 0, sensorVal, 2, cbHandle);
+    while (sensorMb.slave()) {
+      sensorMb.task();
+      delayMicroseconds(100);
+    }
+    if (code == Modbus::EX_SUCCESS) {
+      serverMb.Hreg(0, sensorVal[0]);
+    } else {
+      //
+    }
+
+    xSemaphoreGive(xMutex);
+  }
+}
+
+void sensorLoop(void * pvParameters);
+
 void setup() {
-  // Serial.begin(115200);
+  serverSerial.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);
 
-  S.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);
+  sensorSerial.begin(9600, SERIAL_8N1, SENSOR_RX_PIN, SENSOR_TX_PIN);
 
-  mb.begin(&S, EN_PIN);
-  mb.slave(SLAVE_ID);
 
-  mb.addHreg(0, 100);
-  mb.addHreg(1, 120);
-  mb.addHreg(2, 80);
-  mb.addHreg(3, 90);
+  serverMb.begin(&serverSerial, EN_PIN);
+  serverMb.slave(SLAVE_ID);
+  serverMb.addHreg(0, 100);
+  serverMb.addHreg(1, 80);
+  serverMb.addHreg(2, 120);
+  serverMb.addHreg(3, 60);
 
-  mb.addCoil(REGN, false, 4);
+  serverMb.addCoil(0, true);
+  serverMb.addCoil(1, true);
+  serverMb.addCoil(2, true);
+  serverMb.addCoil(3, true);
 
-  mb.onGet(HREG(REGN), getRegCb);
-  mb.onGet(COIL(REGN), getRegCb);
+
+  sensorMb.begin(&sensorSerial, SENSOR_EN_PIN);
+  sensorMb.master();
+
+  xMutex = xSemaphoreCreateMutex();
+  xTaskCreatePinnedToCore(
+                    sensorLoop,   /* Task function. */
+                    "ReadSensorTask",     /* name of task. */
+                    10000,       /* Stack size of task */
+                    NULL,        /* parameter of the task */
+                    10,           /* priority of the task */
+                    NULL,      /* Task handle to keep track of created task */
+                    0);          /* pin task to core 1 */
+}
+
+void sensorLoop(void * pvParameters) {
+  while (true) {
+    delay(100);
+    readSensor();
+  }
 }
 
 void loop() {
-  mb.task();
+  serverMb.task();
   yield();
 }
