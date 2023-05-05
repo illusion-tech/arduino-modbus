@@ -21,6 +21,22 @@ Modbus::ResultCode code;
 
 xSemaphoreHandle xMutex;
 
+// 继电器状态
+bool replay[3] = {false, false, false};
+// 继电器引脚
+uint8_t replayPins[3] = {2, 4, 5};
+// 继电器状态寄存器地址
+uint16_t replayReg[3] = {0, 1, 2};
+
+// 继电器状态改变回调函数
+uint16_t onSetReplay(TRegister* reg, uint16_t value) {
+  uint16_t address = reg->address.address - replayReg[0];
+  replay[address] = COIL_BOOL(value);
+  digitalWrite(replayPins[address], replay[address]);
+
+  return value;
+}
+
 bool cbHandle(Modbus::ResultCode event, uint16_t transactionId, void* data) {
   code = event;
 
@@ -63,13 +79,13 @@ void setup() {
   serverMb.addHreg(0, 100);
   serverMb.addHreg(1, 80);
   serverMb.addHreg(2, 120);
-  serverMb.addHreg(3, 60);
 
-  serverMb.addCoil(0, true);
-  serverMb.addCoil(1, true);
-  serverMb.addCoil(2, true);
-  serverMb.addCoil(3, true);
-
+  for (int i = 0; i < (sizeof(replayReg) / sizeof(replayReg[0])); i++) {
+    pinMode(replayPins[i], OUTPUT);
+    digitalWrite(replayPins[i], replay[i]);
+    serverMb.addCoil(replayReg[i], replay[i]);
+    serverMb.onSetCoil(replayReg[i], onSetReplay);
+  }
 
   sensorMb.begin(&sensorSerial, SENSOR_EN_PIN);
   sensorMb.master();
