@@ -14,6 +14,14 @@ enum FunctionCode {
   MASKWRITE_REG    = 0x16, // Mask Write Register
   READWRITE_REGS   = 0x17  // Read/Write Multiple registers
 };
+// 定义Modbus帧的结构体
+struct ModbusFrame {
+  uint8_t address;
+  FunctionCode fcode;
+  uint16_t startAddress;
+  uint16_t quantity;
+  uint8_t crc[2];
+};
 
 // 定义Modbus帧的最大长度
 #define MAX_FRAME_LENGTH 256
@@ -29,47 +37,49 @@ enum FunctionCode {
 
 // 定义寄存器初始值
 uint16_t HREG[REG_NUM] = {100, 80, 50};
-bool COIL[REG_NUM] = {false, false, false};
-
-// 定义Modbus帧的结构体
-struct ModbusFrame {
-  uint8_t address;
-  FunctionCode fcode;
-  uint16_t startAddress;
-  uint16_t quantity;
-  uint8_t crc[2];
-};
+bool COIL[REG_NUM] = {0, 0, 0};
+// 定义继电器引脚
+uint16_t REPLAY_PINS[REG_NUM] = {2, 4, 5};
 
 // 定义串口通信的 RX TX 使能 引脚
-#define RX_PIN 18
-#define TX_PIN 17
-#define ENABLE_PIN 21
+#define PC_RX_PIN 18
+#define PC_TX_PIN 17
+#define PC_ENABLE_PIN 21
 
-HardwareSerial S(1);
+HardwareSerial pcSerial(1);
 
 void setup() {
   Serial.begin(115200);
-  S.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);
-  pinMode(ENABLE_PIN, OUTPUT);
-  digitalWrite(ENABLE_PIN, LOW);  // 使能管脚低电平有效
+  pcSerial.begin(115200, SERIAL_8N1, PC_RX_PIN, PC_TX_PIN);
+  pinMode(PC_ENABLE_PIN, OUTPUT);
+  digitalWrite(PC_ENABLE_PIN, LOW);  // 使能管脚低电平有效
+
+  for (int i = 0; i < REG_NUM; i++) {
+    pinMode(REPLAY_PINS[i], OUTPUT);
+    digitalWrite(REPLAY_PINS[i], LOW);
+  }
 }
 
 // 计算CRC校验码
-void crc16modbus(uint8_t *buffer, uint16_t length) {
-  uint16_t crc16 = 0xFFFF;
-  for (int i = 0; i < length; i++) {
-    crc16 ^= buffer[i];
-    for (int j = 0; j < 8; j++) {
-      if (crc16 & 0x0001) {
-        crc16 >>= 1;
-        crc16 ^= 0xA001;
-      } else {
-        crc16 >>= 1;
-      }
+uint16_t crc16(uint8_t *buffer, uint16_t length) {
+  uint16_t crc, temp, flag;
+  crc = 0xFFFF;
+  for (uint8_t i = 0; i < length; i++)
+  {
+    crc ^= buffer[i];
+    for (uint8_t j = 1; j <= 8; j++)
+    {
+      flag = crc & 0x0001;
+      crc >>= 1;
+      if (flag)
+        crc ^= 0xA001;
     }
   }
-  buffer[length] = crc16 & 0xFF;
-  buffer[length + 1] = crc16 >> 8;
+  // Reverse byte order. 
+  temp = crc >> 8;
+  crc = (crc << 8) | temp;
+  crc &= 0xFFFF;
+  return crc;
 }
 
 // 获取 Modbus 请求帧
@@ -83,7 +93,7 @@ void getRequestFrame(ModbusFrame *frame, uint8_t *buffer, uint16_t length) {
 }
 
 // 获取 Modbus 响应帧
-void getResponseFrame(ModbusFrame *frame, uint16_t *response) {
+void getResponseFrame(ModbusFrame *frame, uint8_t *response) {
   FunctionCode fcode = (FunctionCode)frame->fcode;
 
   response[0] = frame->address;
@@ -95,9 +105,6 @@ void getResponseFrame(ModbusFrame *frame, uint16_t *response) {
     case FunctionCode::READ_COILS:
     case FunctionCode::READ_INPUT_STAT:
       byteCount = frame->quantity / 8 + (frame->quantity % 8 == 0 ? 0 : 1);
-      Serial.print("byteCount:");
-      Serial.println(byteCount);
-
       response[2] = byteCount;
       for (int i = 0; i < byteCount; i++) {
         uint8_t byte = 0;
@@ -118,15 +125,15 @@ void getResponseFrame(ModbusFrame *frame, uint16_t *response) {
       }
       break;
   }
-
-  uint16_t responseLen = 3 + response[2];
-
-  crc16modbus((uint8_t *)response, responseLen);
+  uint16_t pduLen = 3 + response[2];
+  uint16_t crc = crc16(response, pduLen);
+  response[pduLen] = crc >> 8;
+  response[pduLen + 1] = crc & 0xFF;
 }
 
 // 发送响应帧
 void sendResponseFrame(ModbusFrame *frame) {
-  uint16_t response[MAX_FRAME_LENGTH];
+  uint8_t response[MAX_FRAME_LENGTH];
   getResponseFrame(frame, response);
 
   Serial.print("response:");
@@ -136,22 +143,57 @@ void sendResponseFrame(ModbusFrame *frame) {
   }
   Serial.println();
 
-  digitalWrite(ENABLE_PIN, HIGH);  // 使能RS485发送
+  digitalWrite(PC_ENABLE_PIN, HIGH);  // 使能RS485发送
   for (int i = 0; i < 3 + response[2] + 2; i++) {
-    S.write(response[i]);
+    pcSerial.write(response[i]);
   }
-  S.flush();
-  digitalWrite(ENABLE_PIN, LOW);  // 禁用RS485发送
+  pcSerial.flush();
+  digitalWrite(PC_ENABLE_PIN, LOW);  // 禁用RS485发送
+}
+
+/// @brief 设置寄存器的值
+/// @param frame 
+/// @param buffer 
+void setRegister(ModbusFrame *frame, uint8_t *buffer) {
+  switch (frame->fcode) {
+    case FunctionCode::WRITE_COIL:
+      setCoil(frame->startAddress, (buffer[4] << 8 | buffer[5]) == 0xFF00);
+      break;
+    case FunctionCode::WRITE_COILS:
+      for (int i = 0; i < frame->quantity; i++) {
+        setCoil(frame->startAddress + i, buffer[7 + i / 8] & (1 << (i % 8)));
+      }
+      break;
+    case FunctionCode::WRITE_REG:
+      setHreg(frame->startAddress, buffer[4] << 8 | buffer[5]);
+      break;
+    case FunctionCode::WRITE_REGS:
+      for (int i = 0; i < frame->quantity; i++) {
+        setHreg(frame->startAddress + i, buffer[7 + i * 2] << 8 | buffer[8 + i * 2]);
+      }
+      break;
+  }
+}
+void setCoil(uint16_t address, bool value) {
+  COIL[address] = value;
+  setRelay(address, value);
+}
+void setHreg(uint16_t address, uint16_t value) {
+  HREG[address] = value;
+}
+
+// 根据线圈状态设置继电器引脚输出
+void setRelay(uint16_t offset, bool value) {
+  digitalWrite(REPLAY_PINS[offset], value);
 }
 
 void loop() {
-  // 如果有数据可读取
-  while (S.available()) {
-    // 读取数据
+  // 接收上位机 Modbus 帧
+  while (pcSerial.available()) {
     uint8_t buffer[MAX_FRAME_LENGTH];
     uint16_t length = 0;
-    while (S.available()) {
-      buffer[length++] = S.read();
+    while (pcSerial.available()) {
+      buffer[length++] = pcSerial.read();
       if (length >= MAX_FRAME_LENGTH) {
         break;
       }
@@ -161,6 +203,7 @@ void loop() {
       Serial.println("接收到空帧");
       continue;
     }
+    if (buffer[0] != SLAVE_ADDRESS) return;
 
     Serial.print("receive:");
     for (int i = 0; i < length; i++) {
@@ -179,7 +222,19 @@ void loop() {
     // 如果起始地址不匹配，忽略此帧
     if (frame.startAddress != HREG_ADDRESS) return;
 
-    // 如果所有条件都匹配，发送响应帧
-    sendResponseFrame(&frame);
+    FunctionCode fcode = (FunctionCode)frame.fcode;
+    switch (fcode) {
+      // 读取线圈和保持寄存器，发送响应帧
+      case FunctionCode::READ_COILS:
+      case FunctionCode::READ_REGS:
+        sendResponseFrame(&frame);
+        break;
+      case FunctionCode::WRITE_COIL:
+      case FunctionCode::WRITE_COILS:
+      case FunctionCode::WRITE_REG:
+      case FunctionCode::WRITE_REGS:
+        setRegister(&frame, buffer);
+        break;
+    }
   }
 }
