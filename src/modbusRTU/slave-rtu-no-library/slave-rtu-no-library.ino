@@ -109,7 +109,7 @@ void getResponseFrame(ModbusFrame *frame, uint8_t *response) {
       for (int i = 0; i < byteCount; i++) {
         uint8_t byte = 0;
         for (int j = 0; j < 8; j++) {
-          if (COIL[frame->startAddress + i * 8 + j]) {
+          if (getCoil(frame->startAddress + i * 8 + j)) {
             byte |= 1 << j;
           }
         }
@@ -120,8 +120,8 @@ void getResponseFrame(ModbusFrame *frame, uint8_t *response) {
     case FunctionCode::READ_INPUT_REGS:
       response[2] = frame->quantity * 2;
       for (int i = 0; i < frame->quantity; i++) {
-        response[3 + i * 2] = HREG[frame->startAddress + i] >> 8;
-        response[3 + i * 2 + 1] = HREG[frame->startAddress + i] & 0xFF;
+        response[3 + i * 2] = getHreg(frame->startAddress + i) >> 8;
+        response[3 + i * 2 + 1] = getHreg(frame->startAddress + i) & 0xFF;
       }
       break;
   }
@@ -180,6 +180,12 @@ void setCoil(uint16_t address, bool value) {
 }
 void setHreg(uint16_t address, uint16_t value) {
   HREG[address] = value;
+}
+bool getCoil(uint16_t address) {
+  return COIL[address];
+}
+uint16_t getHreg(uint16_t address) {
+  return HREG[address];
 }
 
 // 根据线圈状态设置继电器引脚输出
